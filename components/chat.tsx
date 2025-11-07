@@ -142,42 +142,61 @@ const sendMessageCompat = async (msg: any) => {
     msg?.parts?.find?.((p: any) => p?.type === "text")?.text ??
     msg?.text ??
     "";
+
+  // Хэрэв зураг хавсаргасан бол эхлээд /api/vision руу явуулна
+  if (attachments.length > 0) {
+    // Хэрэглэгч текст бичсэн бол UI дээр түр гаргаж өгье
+    if (text) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          // @ts-ignore
+          parts: [{ type: "text", text }],
+        } as any,
+      ]);
+    }
+
+    // Payload бэлдэх (url/previewUrl/file гурвыг даана)
+    const a: any = attachments[0];
+    const payload: any = { prompt: text || "Зургийг тайлбарлаад 3 санаа гарга." };
+
+    if (a?.url || a?.previewUrl) {
+      payload.imageUrl = a.url || a.previewUrl;
+    } else if (a?.file instanceof File) {
+      const buf = await a.file.arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      payload.fileBase64 = b64;
+      payload.mime = a.file.type || "image/jpeg";
+    }
+
+    const r = await fetch("/api/vision", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await r.json();
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        // @ts-ignore
+        parts: [{ type: "text", text: data?.text || data?.reply || "" }],
+      } as any,
+    ]);
+
+    // Зургаа илгээсний дараа хавсралтыг цэвэрлэ
+    setAttachments([]);
+    return; // ЧУХАЛ: энд зогсоно. /api/chat руу давхар явуулахгүй.
+  }
+
+  // Хавсралтгүй бол энгийн текст чатаар яв
   await sendPlain(text);
 };
-
-  // --------------------------
-  // Query string-оос шууд явуулах
-  // --------------------------
-  const searchParams = useSearchParams();
-  const query = searchParams.get("query");
-  const [hasAppendedQuery, setHasAppendedQuery] = useState(false);
-
-  useEffect(() => {
-    if (query && !hasAppendedQuery) {
-      (async () => {
-        await sendPlain(query);
-        setHasAppendedQuery(true);
-        window.history.replaceState({}, "", `/chat/${id}`);
-      })();
-    }
-  }, [query, hasAppendedQuery, id]);
-
-  const { data: votes } = useSWR<Vote[]>(
-    messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
-    fetcher
-  );
-
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
-
-  useAutoResume({
-    autoResume,
-    initialMessages,
-    resumeStream,
-    setMessages,
-  });
-
-  return (
     <>
       <div className="overscroll-behavior-contain flex h-dvh min-w-0 touch-pan-y flex-col bg-background">
         <ChatHeader
